@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M-o-chi.com — уютный форум</title>
+  <meta name="description" content="M-o-chi.com — форум с темами, чатами, кастомизацией оформления и моти-настроением.">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- ================= Шапка ================= -->
+  <header class="header">
+    <div class="container header-inner">
+      <a class="logo" href="#/" aria-label="M-o-chi.com — на главную">
+        <svg class="logo-svg" viewBox="0 0 300 64" aria-hidden="true">
+          <defs>
+            <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="var(--accent)"/>
+              <stop offset="100%" stop-color="var(--accent2)"/>
+            </linearGradient>
+          </defs>
+          <text x="2" y="47" class="logo-text">M</text>
+          <!-- выделенная буква O — моти-шар -->
+          <g class="logo-o">
+            <circle cx="86" cy="33" r="24" fill="url(#logoGrad)"/>
+            <circle cx="86" cy="33" r="9.5" fill="var(--card)" opacity=".28"/>
+            <circle cx="86" cy="33" r="9.5" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>
+            <ellipse cx="77" cy="23" rx="8" ry="5" fill="#fff" opacity=".4" transform="rotate(-24 77 23)"/>
+          </g>
+          <text x="118" y="47" class="logo-text">chi</text>
+        </svg>
+      </a>
+
+      <form class="searchbar" id="searchForm" role="search">
+        <input type="search" id="searchInput" placeholder="Поиск по форуму…" autocomplete="off" maxlength="100">
+        <button type="submit" class="btn ghost sm" title="Найти">🔍</button>
+      </form>
+
+      <nav class="nav" id="mainNav"></nav>
+
+      <div class="auth-area" id="authArea"></div>
+
+      <a class="btn primary sm chats-switch" href="/chats.html#/" title="Mochi chats — чатсы">
+        <span class="chats-switch-dot"></span><span class="hide-sm">Mochi chats</span>
+      </a>
+
+      <button class="burger" id="burgerBtn" aria-label="Меню">☰</button>
+    </div>
+    <div class="mobile-menu" id="mobileMenu"></div>
+  </header>
+
+  <!-- ================= Контент ================= -->
+  <main id="app" class="container app-main">
+    <div class="page-loading"><div class="spinner"></div></div>
+  </main>
+
+  <!-- ================= Подвал ================= -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>🍡 <b>M<span class="footer-o">o</span>chi.com</b> — уютный форум</span>
+      <span class="muted">Сделано с любовью к моти · Node.js + PostgreSQL</span>
+    </div>
+  </footer>
+
+  <!-- тосты и модалки -->
+  <div id="toasts" class="toasts"></div>
+  <div id="modalRoot"></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/pages/core.js"></script>
+  <script src="/js/pages/user.js"></script>
+  <script src="/js/pages/posts.js"></script>
+  <script src="/js/pages/social.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

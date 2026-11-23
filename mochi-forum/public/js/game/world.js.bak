@@ -1,0 +1,520 @@
+/**
+ * Сцена игры «Хаб» (Phaser 3): мир из карт БД (walls/exits/objects),
+ * игроки-кругляшки, авторитарное движение (клиент — контроллер),
+ * объекты take/put/throw, двери-переходы, подсказки «E».
+ * Все спрайты — только через манифест GameAssets (ТЗ §9).
+ */
+window.GameWorld = (() => {
+  const CFG = window.GAME_CONFIG;
+
+  let scene = null;
+  let game = null;
+  let myUserId = null;
+  let map = null;
+  const players = new Map();    // userId → { data, container }
+  const objSprites = new Map(); // id → sprite
+  let statics = [];             // стены/двери локации (пересобираются при переходе)
+  let holdingId = null;         // id объекта в моей руке
+  const keysState = {};         // WASD/стрелки
+  let lastMoveSent = 0;
+  let hint = null;              // подсказка «E — взять»
+  let hintKind = null;          // 'take' | 'exit'
+  let hintPayload = null;
+  let pointerWorld = null;      // мировая позиция курсора (для броска Ctrl+Q)
+
+  const avatarUrl = (p) => {
+    if (!p.avatar) return null;
+    return /^https?:/.test(p.avatar) ? p.avatar : CFG.MAIN_ORIGIN + p.avatar;
+  };
+
+  /** Позиция игрока в экранных координатах (для HTML-пузырей чата) */
+  function getPlayerScreenPos(userId) {
+    const rec = players.get(userId);
+    if (!rec || !scene) return null;
+    const cam = scene.cameras.main;
+    return { x: rec.container.x - cam.scrollX - 60, y: rec.container.y - cam.scrollY - 78 };
+  }
+
+  /** Клиентская коллизия для предсказания (сервер — авторитет, это только визуал) */
+  function hitsWall(x, y, r) {
+    if (!map) return false;
+    for (const w of map.walls) {
+      const cx = Math.max(w.x, Math.min(x, w.x + w.w));
+      const cy = Math.max(w.y, Math.min(y, w.y + w.h));
+      if ((x - cx) ** 2 + (y - cy) ** 2 < r * r) return true;
+    }
+    return false;
+  }
+
+  /** Выполнить fn, когда сцена Phaser готова (join_ok может прийти раньше create) */
+  function whenSceneReady(fn) {
+    if (scene) fn();
+    else setTimeout(() => whenSceneReady(fn), 50);
+  }
+
+  // __PART2__
+
+  /* ---------- создание сцены ---------- */
+
+  function start(locationSlug) {
+    if (game) return; // сцена уже живёт (переход между локациями внутри неё)
+    window.__gameLocation = locationSlug;
+    bindNet(); // net-обработчики — один раз на модуль (не в create, чтобы не дублировать)
+    const parent = document.getElementById('gameCanvasWrap');
+    game = new Phaser.Game({
+      type: Phaser.AUTO,
+      parent,
+      width: parent.clientWidth || 1200,
+      height: parent.clientHeight || 700,
+      backgroundColor: '#1a2030',
+      pixelArt: false,
+      scene: { preload, create, update },
+      scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+    });
+  }
+
+  function isStarted() {
+    return !!game;
+  }
+
+  function stop() {
+    if (game) { game.destroy(true); game = null; }
+    players.clear();
+    objSprites.clear();
+    statics = [];
+    scene = null;
+    myUserId = null;
+    map = null;
+    holdingId = null;
+    hint = null;
+    hintKind = null;
+    hintPayload = null;
+  }
+
+  function preload() {
+    GameAssets.loadAll(this); // только через манифест
+  }
+
+  function create() {
+    scene = this;
+    // сетка-фон (плейсхолдер пола) из манифеста
+    this.add.tileSprite(0, 0, 4000, 4000, 'floor').setOrigin(0).setDepth(-2);
+
+    // управление: WASD/стрелки из config
+    for (const set of Object.values(CFG.KEYS)) {
+      for (const k of set) keysState[k] = false;
+    }
+    // нормализация e.code → ключ из config: KeyW→W, ArrowUp→UP и т.д.
+    // (e.code физический — не зависит от русской раскладки)
+    const normKey = (code) => String(code).replace('Key', '').replace('Arrow', '').toUpperCase();
+    this.input.keyboard.on('keydown', (e) => {
+      const k = normKey(e.code);
+      if (k in keysState) keysState[k] = true;
+      if (CFG.KEYS.interact.includes(k)) doInteract();
+      // бросок: Ctrl+Q в сторону курсора (если курсора нет — перед собой)
+      if (k === 'Q' && e.ctrlKey) {
+        e.preventDefault(); // Ctrl+Q в некоторых браузерах закрывает окно
+        doThrow();
+      } else if (CFG.KEYS.put.includes(k)) {
+        doPut();
+      }
+    });
+    this.input.keyboard.on('keyup', (e) => {
+      const k = normKey(e.code);
+      if (k in keysState) keysState[k] = false;
+    });
+    // курсор: запоминаем мировую позицию для броска по Ctrl+Q
+    this.input.on('pointermove', (p) => {
+      pointerWorld = { x: p.worldX, y: p.worldY };
+    });
+    // клик мышью — повернуться в сторону клика (как в SS13)
+    this.input.on('pointerdown', (p) => {
+      const me = players.get(myUserId);
+      if (!me) return;
+      const dx = p.worldX - me.container.x;
+      const dy = p.worldY - me.container.y;
+      if (Math.hypot(dx, dy) < 6) return; // клик по себе
+      const face = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'down' : 'up');
+      GameCharacter.setFace(me.container, face);
+    });
+  }
+
+  /* ---------- net-обработчики (уровень модуля, регистрируются в start()) ---------- */
+
+  /** Отправить join, когда и сцена, и авторизация готовы */
+  function tryJoin() {
+    if (!GameNet.connected || !window.__gameLocation) return;
+    whenSceneReady(() => {
+      GameNet.send({ type: 'join', location: window.__gameLocation });
+    });
+  }
+
+  function bindNet() {
+    GameNet.on('auth_ok', (f) => {
+      myUserId = f.user.id;
+      tryJoin(); // ← ключевой момент: join отправляется сразу после auth_ok
+    });
+    GameNet.on('join_ok', onJoinOk);
+    GameNet.on('snapshot', onSnapshot);
+    GameNet.on('player_join', onPlayerJoin);
+    GameNet.on('player_leave', onPlayerLeave);
+    GameNet.on('chat', onChat);
+    GameNet.on('object_state', onObjectState);
+    GameNet.on('object_removed', onObjectRemoved);
+    GameNet.on('error', (f) => UI.toast(f.message, 'error'));
+  }
+
+  /* ---------- join / snapshots ---------- */
+
+  function onJoinOk(f) {
+    map = f.location.map;
+    myUserId = f.you.userId;
+    holdingId = f.you.holding || null;
+    GameChat.setLocation(f.location.name);
+    GameChat.renderHistory(f.chatHistory);
+
+    // пересборка статики при переходе между локациями
+    for (const s of statics) s.destroy();
+    statics = [];
+
+    // стены и двери рисуются из map
+    for (const w of map.walls) {
+      statics.push(scene.add.image(w.x + w.w / 2, w.y + w.h / 2, 'wall').setDisplaySize(w.w, w.h).setDepth(2));
+    }
+    for (const e of map.exits || []) {
+      statics.push(scene.add.image(e.x + e.w / 2, e.y + e.h / 2, 'door').setDisplaySize(e.w, e.h).setDepth(1));
+    }
+    // границы мира для камеры
+    scene.physics.world.setBounds(0, 0, map.width, map.height);
+    scene.cameras.main.setBounds(0, 0, map.width, map.height);
+
+    // чужие игроки прежней локации не переносятся
+    for (const [uid, rec] of [...players]) {
+      if (uid !== myUserId) { rec.container.destroy(); players.delete(uid); }
+    }
+    // игроки
+    for (const p of f.players) upsertPlayer(p);
+    if (players.get(myUserId)) scene.cameras.main.startFollow(players.get(myUserId).container, true, 0.12, 0.12);
+
+    // объекты прежней локации стираются
+    for (const [, sp] of objSprites) sp.destroy();
+    objSprites.clear();
+    for (const o of f.objects) upsertObject(o);
+  }
+
+  function upsertPlayer(p) {
+    let rec = players.get(p.userId);
+    if (!rec) {
+      const container = GameCharacter.create(scene, {
+        userId: p.userId,
+        username: p.username,
+        avatar: avatarUrl(p),
+        x: p.x,
+        y: p.y,
+      });
+      rec = {
+        data: p,
+        container,
+        // sim — предсказанная позиция (для себя), rx/ry — сглаженный рендер
+        sim: { x: p.x, y: p.y, vx: 0, vy: 0 },
+        rx: p.x,
+        ry: p.y,
+        walk: false,
+      };
+      players.set(p.userId, rec);
+      container.setData('dir', p.dir || 1);
+    } else {
+      Object.assign(rec.data, p);
+      rec.container.setData('dir', p.dir || 1);
+      // дистанционные игроки смотрят в сторону движения (влево/вправо от сервера)
+      if (p.userId !== myUserId) {
+        GameCharacter.setFace(rec.container, (p.dir || 1) > 0 ? 'right' : 'left');
+      }
+    }
+  }
+
+  function onSnapshot(f) {
+    for (const p of f.players) upsertPlayer(p);
+    for (const o of f.objects) upsertObject(o);
+  }
+
+  function onPlayerJoin(f) {
+    upsertPlayer(f.player);
+    UI.toast(`${f.player.username} вошёл в локацию`, 'info', 2000);
+  }
+
+  function onPlayerLeave(f) {
+    const rec = players.get(f.userId);
+    if (rec) {
+      rec.container.destroy();
+      players.delete(f.userId);
+      GameChat.hideBubble(f.userId);
+      UI.toast('Игрок покинул локацию', 'info', 2000);
+    }
+  }
+
+  /** Предмет использован и исчез (заготовка эффектов на будущее) */
+  function onObjectRemoved(f) {
+    const sp = objSprites.get(f.id);
+    const defKey = sp ? sp.getData('defKey') : null;
+    if (sp) { sp.destroy(); objSprites.delete(f.id); }
+    if (holdingId === f.id) {
+      holdingId = null;
+      UI.toast('Предмет использован — он исчез', 'info', 2500);
+    } else if (defKey) {
+      UI.toast('Кто-то использовал предмет', 'info', 2000);
+    }
+  }
+
+  // __PART3__
+
+  /* ---------- объекты ---------- */
+
+  /** Отображаемые размеры объектов (близко к серверным коллизиям) */
+  const OBJ_SIZES = { ball: 34, box: 40, stone: 34 };
+
+  function upsertObject(o) {
+    let sp = objSprites.get(o.id);
+    const mine = holdingId === o.id; // мой предмет в руках
+    if (o.taken_by != null && !mine) {
+      // «в руке» другого игрока — скрыт от нас
+      if (sp) { sp.destroy(); objSprites.delete(o.id); }
+      return;
+    }
+    if (!sp) {
+      sp = scene.add.image(o.x, o.y, o.def_key).setDepth(5);
+      const S = OBJ_SIZES[o.def_key] || 32;
+      sp.setDisplaySize(S, S);
+      sp.setData('objId', o.id);
+      sp.setData('defKey', o.def_key);
+      objSprites.set(o.id, sp);
+    }
+    if (mine) return; // позицию моего предмета задаёт update() (у руки) — без дёрганья
+    sp.x = o.x;
+    sp.y = o.y;
+  }
+
+  function onObjectState(f) {
+    const o = f.object;
+    if (o.taken_by === myUserId) holdingId = o.id;          // я взял
+    else if (holdingId === o.id && o.taken_by == null) holdingId = null; // положил/бросил
+    upsertObject(o);
+  }
+
+  /* ---------- действия ---------- */
+
+  function doInteract() {
+    if (!scene) return;
+    // E с предметом в руках — использовать (заготовка на будущее)
+    if (holdingId != null) {
+      GameNet.send({ type: 'interact', action: 'use' });
+      return;
+    }
+    if (hintKind === 'take' && hintPayload) {
+      GameNet.send({ type: 'interact', action: 'take', objectId: hintPayload });
+    } else if (hintKind === 'exit' && hintPayload) {
+      const ov = document.getElementById('gameTransition');
+      if (ov) ov.classList.add('show');
+      GameNet.send({ type: 'use_exit', exitId: hintPayload });
+    }
+  }
+
+  function doPut() {
+    if (holdingId != null) GameNet.send({ type: 'interact', action: 'put' });
+  }
+
+  /** Бросок: Ctrl+Q; направление — на курсор, если он известен, иначе перед собой */
+  function doThrow() {
+    if (holdingId == null) return;
+    const me = players.get(myUserId);
+    if (!me) return;
+    let dx = me.container.getData('dir') || 1;
+    let dy = 0;
+    if (pointerWorld) {
+      const wx = pointerWorld.x - me.container.x;
+      const wy = pointerWorld.y - me.container.y;
+      const l = Math.hypot(wx, wy);
+      if (l > 8) { dx = wx / l; dy = wy / l; } // курсор не на персонаже
+    }
+    GameNet.send({ type: 'interact', action: 'throw', dir: { x: dx, y: dy } });
+  }
+
+  /* ---------- чат ---------- */
+
+  function onChat(f) {
+    GameChat.addLine(f.username, f.text);
+    GameChat.showBubble(GameWorld, f.userId, f.username, f.text);
+  }
+
+  // __PART4__
+
+  /* ---------- подсказки «E» ---------- */
+
+  function updateHint() {
+    if (!scene || !map || myUserId == null) return;
+    const me = players.get(myUserId);
+    if (!me) return;
+    const px = me.container.x;
+    const py = me.container.y;
+
+    let kind = null;
+    let payload = null;
+    let label = '';
+    let best = 1e9;
+
+    if (holdingId != null) {
+      // предмет в руках — постоянная подсказка действий
+      kind = 'holding';
+      label = 'E — использовать · Q — положить · Ctrl+Q — бросить';
+    } else {
+      for (const [, sp] of objSprites) {
+        const d = Math.hypot(sp.x - px, sp.y - py);
+        if (d < 90 && d < best) {
+          best = d; kind = 'take'; payload = sp.getData('objId'); label = 'E — взять';
+        }
+      }
+      if (!kind) {
+        for (const e of map.exits || []) {
+          const d = Math.hypot(e.x + e.w / 2 - px, e.y + e.h / 2 - py);
+          if (d < 100 && d < best) {
+            best = d; kind = 'exit'; payload = e.id; label = 'E — перейти';
+          }
+        }
+      }
+    }
+
+    if (kind) {
+      if (!hint) {
+        hint = scene.add.text(0, 0, label, {
+          fontSize: '12px', color: '#fff', backgroundColor: '#000000aa', padding: { x: 6, y: 3 },
+        }).setDepth(20);
+      }
+      hint.setText(label);
+      hint.setPosition(px - hint.width / 2, py - 44);
+      hint.setVisible(true);
+      hintKind = kind;
+      hintPayload = payload;
+    } else {
+      if (hint) hint.setVisible(false);
+      hintKind = null;
+      hintPayload = null;
+    }
+  }
+
+  /* ---------- игровой цикл (плавное движение) ---------- */
+
+  const MAX_SPEED = CFG.MAX_SPEED || 220; // px/s (лимит сервера)
+
+  function update(time, delta) {
+    if (!scene || myUserId == null || !map) return;
+    const me = players.get(myUserId);
+    if (!me || !me.sim) return;
+    const dt = Math.min(0.05, delta / 1000);
+    const R = 22; // радиус тела (= PLAYER_RADIUS сервера)
+
+    /* --- 1. моё движение: предсказание с плавным разгоном/торможением --- */
+    const pressed = (dir) => (CFG.KEYS[dir] || []).some((k) => keysState[k]);
+    let ix = 0;
+    let iy = 0;
+    if (pressed('left')) ix -= 1;
+    if (pressed('right')) ix += 1;
+    if (pressed('up')) iy -= 1;
+    if (pressed('down')) iy += 1;
+    const movingNow = ix !== 0 || iy !== 0;
+    const ilen = Math.hypot(ix, iy) || 1;
+    const tvx = movingNow ? (ix / ilen) * MAX_SPEED : 0;
+    const tvy = movingNow ? (iy / ilen) * MAX_SPEED : 0;
+    // плавный разгон/торможение скорости (без резких стартов/остановок)
+    const accelK = 1 - Math.exp(-18 * dt);
+    me.sim.vx += (tvx - me.sim.vx) * accelK;
+    me.sim.vy += (tvy - me.sim.vy) * accelK;
+
+    // интеграция с локальной коллизией (оси раздельно, как на сервере)
+    const nx = me.sim.x + me.sim.vx * dt;
+    const ny = me.sim.y + me.sim.vy * dt;
+    if (!hitsWall(nx, me.sim.y, R)) me.sim.x = Phaser.Math.Clamp(nx, R, map.width - R);
+    else me.sim.vx = 0;
+    if (!hitsWall(me.sim.x, ny, R)) me.sim.y = Phaser.Math.Clamp(ny, R, map.height - R);
+    else me.sim.vy = 0;
+
+    /* --- 2. реконсиляция с сервером: мягкое подтягивание вместо телепортов --- */
+    if (me.data && Number.isFinite(me.data.x)) {
+      const ex = me.data.x - me.sim.x;
+      const ey = me.data.y - me.sim.y;
+      const d = Math.hypot(ex, ey);
+      if (d > 160) {
+        // большое расхождение (переход/телепорт) — мягкого схлопывания мало
+        me.sim.x = me.data.x;
+        me.sim.y = me.data.y;
+        me.rx = me.data.x;
+        me.ry = me.data.y;
+      } else if (d > 0.5) {
+        const pullK = 1 - Math.exp(-5 * dt); // непрерывная коррекция дрейфа
+        me.sim.x += ex * pullK;
+        me.sim.y += ey * pullK;
+      }
+    }
+
+    /* --- 3. рендер-позиция: двойное сглаживание (sim → rx) --- */
+    const renderK = 1 - Math.exp(-22 * dt);
+    me.rx += (me.sim.x - me.rx) * renderK;
+    me.ry += (me.sim.y - me.ry) * renderK;
+    me.container.x = me.rx;
+    me.container.y = me.ry;
+
+    // лицо по направлению движения (доминирующая ось), как в SS13
+    const speed = Math.hypot(me.sim.vx, me.sim.vy);
+    if (movingNow) {
+      const face = Math.abs(ix) > Math.abs(iy) ? (ix > 0 ? 'right' : 'left') : (iy > 0 ? 'down' : 'up');
+      if (Math.abs(ix) !== Math.abs(iy)) GameCharacter.setFace(me.container, face);
+    }
+
+    // отправка move 15 Гц: цель — чуть впереди предсказанной позиции
+    if (movingNow && time - lastMoveSent >= 1000 / CFG.MOVE_SEND_HZ) {
+      lastMoveSent = time;
+      const len = ilen;
+      GameNet.send({
+        type: 'move',
+        x: Phaser.Math.Clamp(me.sim.x + (ix / len) * 48, 1, map.width - 1),
+        y: Phaser.Math.Clamp(me.sim.y + (iy / len) * 48, 1, map.height - 1),
+      });
+    }
+
+    GameCharacter.walk(me.container, speed > 20, delta);
+
+    /* --- 4. дистанционные игроки: плавная интерполяция к снапшотам --- */
+    for (const [uid, rec] of players) {
+      if (uid === myUserId) continue;
+      const c = rec.container;
+      const dx = rec.data.x - c.x;
+      const dy = rec.data.y - c.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 300) { c.x = rec.data.x; c.y = rec.data.y; } // телепорт — сразу
+      else if (d > 0.5) {
+        const k = 1 - Math.exp(-12 * dt);
+        c.x += dx * k;
+        c.y += dy * k;
+      }
+      GameCharacter.walk(c, d > 3, delta);
+    }
+
+    /* --- 5. предмет в руке: строго у передней ручки (один источник позиции) --- */
+    if (holdingId != null) {
+      const sp = objSprites.get(holdingId);
+      if (sp) {
+        const hand = GameCharacter.handPos(me.container);
+        sp.x = hand.x;
+        sp.y = hand.y;
+      }
+    }
+
+    updateHint();
+    GameChat.updatePositions(GameWorld);
+  }
+
+  return { start, stop, isStarted, getPlayerScreenPos };
+})();
+
+
+
+

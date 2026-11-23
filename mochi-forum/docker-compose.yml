@@ -1,0 +1,80 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: mochi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mochi
+      POSTGRES_USER: mochi
+      POSTGRES_PASSWORD: mochi_secret
+    # 5433 на хосте, чтобы не конфликтовать с другими локальными PostgreSQL
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mochi -d mochi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mochi-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://mochi:mochi_secret@db:5432/mochi
+      JWT_SECRET: change-me-super-secret-in-production
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/app/server/uploads
+
+  # ---------- Игра «Хаб»: отдельный сервис + отдельная БД (изоляция!) ----------
+  game-db:
+    image: postgres:16-alpine
+    container_name: mochi-game-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mochi_game
+      POSTGRES_USER: mochi_game
+      POSTGRES_PASSWORD: game_secret
+    # 5434 на хосте — только для dev; в проде БД не публикуются
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata_game:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mochi_game -d mochi_game"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  game:
+    build:
+      context: .
+      dockerfile: game-server/Dockerfile.game
+    container_name: mochi-game
+    restart: unless-stopped
+    depends_on:
+      game-db:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgres://mochi_game:game_secret@game-db:5432/mochi_game
+      JWT_SECRET: change-me-super-secret-in-production   # ТОТ ЖЕ, что у app!
+      MAIN_API_URL: http://app:3000
+    ports:
+      - "3001:3001"
+    mem_limit: 512m          # игра не должна задушить форум при утечке
+
+volumes:
+  pgdata:
+  uploads:
+  pgdata_game:

@@ -1,0 +1,176 @@
+/**
+ * Объекты мира: состояние в памяти комнаты, серверная логика take/put/throw,
+ * физика броска (начальная скорость ≤ 500 px/s, затухание, остановка у стены).
+ */
+const { query } = require('../config/db');
+const { circleHitsWalls, clampToBounds, findFreeSpot } = require('./map');
+
+const PICKUP_RADIUS = 90;        // с какого расстояния можно взять
+const THROW_MAX_SPEED = 500;     // максимальная начальная скорость броска
+const THROW_DEFAULT_SPEED = 380; // если клиент не прислал силу броска
+const FRICTION = 3.2;            // затухание скорости, 1/с
+const STOP_SPEED = 25;           // ниже этой скорости объект останавливается
+const HAND_OFFSET_X = 30;        // где «рука» держащего относительно центра
+const HAND_OFFSET_Y = -6;
+const OBJECT_RADIUS = { ball: 13, box: 17, stone: 13 }; // радиусы коллизии по типам
+
+function radiusOf(defKey) {
+  return OBJECT_RADIUS[defKey] || 14;
+}
+
+/** Объект мира в комнате */
+class WorldObject {
+  constructor(row) {
+    this.id = row.id;
+    this.def_key = row.def_key;
+    this.x = row.x;
+    this.y = row.y;
+    this.vx = row.vx || 0;
+    this.vy = row.vy || 0;
+    this.taken_by = row.taken_by != null ? row.taken_by : null;
+    this.dirty = false; // требует записи в БД
+  }
+
+  /** Публичное представление (vx/vy — только в полёте) */
+  toPublic() {
+    const o = { id: this.id, def_key: this.def_key, x: round1(this.x), y: round1(this.y) };
+    if (this.taken_by == null && (this.vx || this.vy)) {
+      o.vx = round1(this.vx);
+      o.vy = round1(this.vy);
+    }
+    if (this.taken_by != null) o.taken_by = this.taken_by;
+    return o;
+  }
+}
+
+const round1 = (n) => Math.round(n) ; // позиции объектов целыми — точность не критична
+
+/** Физический шаг объекта (полёт/держание) — вызывается из тика комнаты */
+function step(room, o, dt) {
+  // объект в руке: следует за держащим (в БД пишем только при броске/кладке)
+  if (o.taken_by != null) {
+    const p = room.players.get(o.taken_by);
+    if (p) {
+      o.x = p.x + HAND_OFFSET_X * (p.dir || 1);
+      o.y = p.y + HAND_OFFSET_Y;
+    }
+    return;
+  }
+  const wasFlying = !!(o.vx || o.vy);
+  if (!wasFlying) return;
+
+  // полёт: оси раздельно — у стены останавливаем составляющую (не пролетает сквозь)
+  const nx = o.x + o.vx * dt;
+  const ny = o.y + o.vy * dt;
+  const r = radiusOf(o.def_key);
+  if (circleHitsWalls(room.map, nx, o.y, r)) o.vx = 0;
+  else o.x = clampToBounds(room.map, nx, o.y, r).x;
+  if (circleHitsWalls(room.map, o.x, ny, r)) o.vy = 0;
+  else o.y = clampToBounds(room.map, o.x, ny, r).y;
+
+  // затухание и остановка
+  const k = Math.exp(-FRICTION * dt);
+  o.vx *= k;
+  o.vy *= k;
+  if (Math.hypot(o.vx, o.vy) < STOP_SPEED) {
+    o.vx = 0;
+    o.vy = 0;
+  }
+
+  if (wasFlying && !o.vx && !o.vy) {
+    // полёт завершён: финальная позиция валидна здесь — рассылаем всем и в БД
+    room.broadcastObjectState(o);
+  }
+  o.dirty = true;
+}
+
+/**
+ * Взять объект: первый взявший получает; если taken_by уже стоит — отказ.
+ * Здесь и далее ошибки возвращаются строкой (отправляет их диспетчер как {type:'error'}).
+ */
+function take(room, player, objectId) {
+  const obj = room.objects.find((o) => o.id === objectId);
+  if (!obj) return 'Объект не найден';
+  if (obj.taken_by != null) return 'Объект уже занят';
+  if (player.holding != null) return 'У вас уже заняты руки';
+  const d = Math.hypot(obj.x - player.x, obj.y - player.y);
+  if (d > PICKUP_RADIUS) return 'Слишком далеко';
+  obj.taken_by = player.userId;
+  obj.vx = 0;
+  obj.vy = 0;
+  player.holding = obj.id;
+  room.markDirty(obj);
+  room.broadcastObjectState(obj);
+  return null;
+}
+
+/** Положить объект у ног держащего */
+function put(room, player) {
+  const obj = room.objects.find((o) => o.id === player.holding);
+  if (!obj) return 'В руках ничего нет';
+  const spot = findFreeSpot(room.map, player.x + 26 * (player.dir || 1), player.y + 16, radiusOf(obj.def_key));
+  obj.x = spot.x;
+  obj.y = spot.y;
+  obj.vx = 0;
+  obj.vy = 0;
+  obj.taken_by = null;
+  player.holding = null;
+  room.markDirty(obj);
+  room.broadcastObjectState(obj);
+  return null;
+}
+
+/** Бросок по направлению dir {x,y} (нормализуется на сервере) */
+function throwObj(room, player, dir) {
+  const obj = room.objects.find((o) => o.id === player.holding);
+  if (!obj) return 'В руках ничего нет';
+  let dx = Number(dir && dir.x);
+  let dy = Number(dir && dir.y);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) {
+    dx = player.dir || 1; // нет направления — бросаем «лицом»
+    dy = 0;
+  }
+  const len = Math.hypot(dx, dy) || 1;
+  const speed = Math.min(THROW_MAX_SPEED, THROW_DEFAULT_SPEED);
+  obj.x = player.x + 26 * (player.dir || 1);
+  obj.y = player.y + HAND_OFFSET_Y;
+  obj.vx = (dx / len) * speed;
+  obj.vy = (dy / len) * speed;
+  obj.taken_by = null;
+  player.holding = null;
+  room.markDirty(obj);
+  room.broadcastObjectState(obj);
+  return null;
+}
+
+/**
+ * Использовать предмет в руках (заготовка на будущее, ТЗ п.5).
+ * Эффекты по типам добавляются в USE_EFFECTS; сейчас предмет расходуется
+ * и исчезает: удаляется из комнаты и из БД (переживает рестарт сервера).
+ */
+const USE_EFFECTS = {
+  ball: 'Мяч сдулся с хлопком 💨',
+  box: 'Ящик рассыпался на доски 🪵',
+  stone: 'Камень раскрошился в пыль ✨',
+};
+
+/** Текст эффекта использования (для клиента) */
+function useEffectText(defKey) {
+  return USE_EFFECTS[defKey] || 'Предмет использован';
+}
+
+/** Использовать (расходовать) предмет из рук */
+function use(room, player) {
+  const obj = room.objects.find((o) => o.id === player.holding);
+  if (!obj) return 'В руках ничего нет';
+  player.holding = null;
+  room.objects = room.objects.filter((o) => o.id !== obj.id);
+  // исчезновение — навсегда: удаление из БД игры
+  query('DELETE FROM world_objects WHERE id = $1', [obj.id])
+    .catch((e) => console.error('[objects] use-delete:', e.message));
+  room.broadcastRemoved(obj.id);
+  console.log(`[objects] ${player.username} использовал ${obj.def_key} #${obj.id} (заготовка эффекта)`);
+  return null;
+}
+
+module.exports = { WorldObject, step, take, put, throwObj, use, useEffectText, radiusOf, PICKUP_RADIUS };

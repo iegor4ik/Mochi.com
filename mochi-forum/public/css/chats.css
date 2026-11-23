@@ -1,0 +1,383 @@
+/* ============================================================
+   Mochi chats — вторая часть сайта M-o-chi.com
+   Светлая голубоватая база + темы чатсов (CSS-переменные)
+   ============================================================ */
+
+/* Базовые переменные чатсов (светлее и голубее основного сайта) */
+body.chats-body {
+  --ch-bg: #eef5fd;
+  --ch-bg2: #e1edfa;
+  --ch-card: #ffffff;
+  --ch-card2: #f2f7fe;
+  --ch-text: #17263b;
+  --ch-muted: #5d7392;
+  --ch-border: #cfe0f4;
+  --accent: #3aa0ff;
+  --accent2: #6c7cff;
+
+  background: var(--ch-bg);
+  color: var(--ch-text);
+}
+
+/* Тёмная тема чатсов — переменные переключаются вместе с data-chats-dark */
+body.chats-body[data-chats-dark="1"] {
+  --ch-bg: #0c1424;
+  --ch-bg2: #101a2e;
+  --ch-card: #141e34;
+  --ch-card2: #1a2540;
+  --ch-text: #e9eefb;
+  --ch-muted: #94a3c5;
+  --ch-border: #25314e;
+}
+
+body.chats-body.gradient-on {
+  background:
+    radial-gradient(1100px 480px at 90% -120px, color-mix(in srgb, var(--accent) 16%, transparent), transparent),
+    radial-gradient(900px 420px at -80px 35%, color-mix(in srgb, var(--accent2) 14%, transparent), transparent),
+    var(--ch-bg);
+}
+
+/* Голубой хедер чатсов */
+.chats-header {
+  background: linear-gradient(135deg, #d7ecff, #e8f3ff 55%, #e3ebff);
+  border-bottom: 1px solid #bcd8f2;
+}
+body.chats-body[data-chats-dark="1"] .chats-header {
+  background: linear-gradient(135deg, #14243c, #16294a 55%, #172045);
+  border-bottom-color: #24406a;
+}
+.chats-logo-sub { font-size: 30px; font-weight: 700; opacity: .85; }
+
+.chats-main {
+  /* тема активного чатса переопределяет это через inline-style на main */
+  position: relative;
+}
+
+/* ---------- Карточка чатса в ленте ---------- */
+.chats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 14px;
+}
+.chat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  text-decoration: none !important;
+  color: inherit;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.chat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+.chat-card-photo {
+  height: 110px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 26%, var(--card)), color-mix(in srgb, var(--accent2) 26%, var(--card)));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 44px;
+  background-size: cover; background-position: center;
+}
+.chat-card-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.chat-card-title { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+.chat-card-title h3 { margin: 0; font-size: 1.02rem; }
+.chat-card-excerpt { color: var(--muted); font-size: .86rem; min-height: 2.2em; }
+.chat-card-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: .78rem; align-items: center; }
+
+.kind-chip {
+  font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); white-space: nowrap;
+}
+.kind-chip.public   { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.kind-chip.request  { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.kind-chip.private  { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* ---------- Страница чатса ---------- */
+.gchat-shell { display: flex; flex-direction: column; gap: 16px; }
+
+.gchat-hero {
+  border-radius: calc(var(--radius) + 6px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.gchat-hero-head {
+  display: flex; align-items: center; gap: 16px; padding: 20px;
+  background-size: cover; background-position: center;
+}
+.gchat-hero-photo {
+  width: 86px; height: 86px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px; color: #fff; flex-shrink: 0; overflow: hidden;
+  border: 3px solid rgba(255,255,255,.6);
+}
+.gchat-hero-photo img { width: 100%; height: 100%; object-fit: cover; }
+.gchat-hero-titles h1 { margin: 0 0 4px; font-size: 1.5rem; }
+.gchat-hero-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+.gchat-desc {
+  padding: 18px 20px 20px;
+  background-size: cover; background-position: center;
+}
+.gchat-desc .post-content-html { overflow-wrap: anywhere; word-break: break-word; }
+.gchat-desc .post-content-html { background: rgba(255,255,255,.72); border-radius: 12px; padding: 12px 14px; }
+body[data-chats-dark="1"] .gchat-desc .post-content-html { background: rgba(10, 18, 32, .55); }
+.post-content-html img { border-radius: 10px; }
+
+.gchat-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.gchat-desc .gchat-tags { padding: 12px 0 0; }
+.gchat-desc .gchat-tags .tag-chip { background: rgba(255,255,255,.72); }
+body[data-chats-dark="1"] .gchat-desc .gchat-tags .tag-chip { background: rgba(10, 18, 32, .55); }
+
+/* ---------- Низ страницы: сообщение/участники ---------- */
+.gchat-columns {
+  display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start;
+}
+@media (min-width: 980px) {
+  .gchat-columns.has-side { grid-template-columns: minmax(0, 1fr) 300px; }
+}
+
+.side-panel {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px); box-shadow: var(--shadow-sm);
+  padding: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.member-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border-radius: 10px; cursor: pointer; position: relative;
+}
+.member-row:hover { background: var(--bg2); }
+.member-row .avatar { position: relative; }
+.member-row .uname { font-weight: 600; font-size: .9rem; }
+.online-dot {
+  position: absolute; right: -1px; bottom: -1px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #9aa7bd; border: 2px solid var(--card);
+}
+.online-dot.on { background: var(--ok); }
+
+.owner-chip {
+  font-size: .7rem; font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 999px; padding: 1px 7px; white-space: nowrap;
+}
+.role-chip-custom {
+  font-size: .7rem; font-weight: 700; border-radius: 999px; padding: 1px 7px;
+  border: 1px solid currentColor; white-space: nowrap;
+}
+/* ---------- Сообщения чатса ----------
+   Раскладка (.msg/.msg-wrap/.msg-bubble/.msg.mine) берётся из style.css —
+   идентично личным чатам. Здесь только дополнения. */
+.gchat-messages {
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--card);
+  padding: 14px 16px; overflow-y: auto;
+}
+.gchat-thread-box .gchat-messages { min-height: 0; }
+.msg-wrap { width: fit-content; max-width: min(76%, 640px); }
+.msg-username {
+  font-size: .78rem; font-weight: 700; color: var(--muted);
+  margin-bottom: 3px; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.msg-footer { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: .72rem; color: var(--muted); }
+.msg-system {
+  text-align: center; color: var(--muted); font-size: .8rem;
+  padding: 2px 8px; font-style: italic;
+}
+.msg-hidden { font-style: italic; color: var(--muted); }
+
+/* Ответ на сообщение */
+.reply-quote {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  padding: 4px 8px; border-radius: 6px; font-size: .78rem;
+  margin-bottom: 5px; cursor: pointer; color: var(--muted);
+  max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.reply-quote:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* Персона: кружок «П» рядом с никнеймом */
+.persona-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: linear-gradient(135deg, #f7b7d2, #b48cf2);
+  color: #fff; font-size: .62rem; font-weight: 900; font-style: normal;
+  flex-shrink: 0;
+}
+.persona-name { font-weight: 800; }
+
+/* Печатает… */
+.typing-line { color: var(--muted); font-size: .8rem; padding: 2px 6px; min-height: 1.2em; font-style: italic; }
+
+/* Контекстное меню (правая кнопка) */
+.ctx-menu {
+  position: fixed; z-index: 300; min-width: 180px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow); padding: 6px;
+  display: flex; flex-direction: column;
+}
+.ctx-menu button {
+  background: none; border: none; text-align: left; padding: 8px 10px;
+  border-radius: 8px; cursor: pointer; font: inherit; color: var(--text); width: 100%;
+}
+.ctx-menu button:hover { background: var(--bg2); }
+.ctx-menu button.danger { color: var(--danger); }
+
+/* Пины и подчатсы */
+.pinned-bar {
+  display: flex; gap: 8px; align-items: center; overflow-x: auto;
+  background: color-mix(in srgb, var(--warn) 12%, var(--card));
+  border: 1px dashed color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 12px; padding: 8px 12px; font-size: .82rem;
+}
+.subchat-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Табы ленты */
+.feed-tabs button, .tabs button {
+  background: none; border: 1px solid transparent; color: var(--muted);
+  padding: 7px 14px; border-radius: 999px; cursor: pointer; font: inherit; font-weight: 600;
+}
+.feed-tabs button.active, .tabs button.active {
+  background: color-mix(in srgb, var(--accent) 16%, var(--card));
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Сайдбар «мои чатсы» */
+.my-chats-list { display: flex; flex-direction: column; gap: 4px; }
+.conv-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: 12px; cursor: pointer; border: 1px solid transparent;
+}
+.conv-item:hover { background: var(--bg2); }
+.conv-item.active { background: color-mix(in srgb, var(--accent) 12%, var(--card)); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+.conv-name { font-weight: 700; font-size: .92rem; }
+.conv-last { color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
+.unread-pill {
+  background: var(--accent); color: #fff; border-radius: 999px;
+  min-width: 20px; height: 20px; font-size: .72rem; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0 5px;
+}
+
+/* Уведомления */
+.notif-row {
+  display: flex; gap: 10px; align-items: flex-start; padding: 12px;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--card);
+}
+.notif-row.unread { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+
+/* Пустые состояния */
+.empty-state { text-align: center; padding: 34px 16px; color: var(--muted); }
+.empty-state .big { font-size: 2.6rem; margin-bottom: 6px; }
+
+/* ---------- Широкая админ-модалка чатса ---------- */
+.modal-admin { width: min(980px, 94vw); max-width: 94vw; }
+.modal-admin #admBody { min-width: 0; width: 100%; }
+.modal-admin .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+.modal-admin .tabs button { padding: 6px 12px; font-size: .85rem; }
+.modal-admin .form-group { margin-bottom: 12px; }
+.modal-admin .notif-row { align-items: center; gap: 10px; }
+.modal-admin h3 { font-size: 1.15rem; }
+.modal-admin .editor-toolbar { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+.modal-admin .editor-toolbar button, .modal-admin .editor-toolbar select { min-width: 34px; }
+
+/* ---------- Рейка скрытия панелей (описание/участники) ---------- */
+.gchat-columns { position: relative; column-gap: 56px; }
+.gchat-col-main { position: relative; min-width: 0; }
+.chat-rail { position: absolute; top: 4px; right: -56px; display: flex; flex-direction: column; gap: 8px; z-index: 6; }
+.chat-rail button {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  background: var(--card); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 7px; cursor: pointer; font: inherit; font-size: .8rem; font-weight: 700;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.chat-rail button:hover { color: var(--text); }
+.chat-rail button.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+}
+.gchat-shell.hide-desc .gchat-hero { display: none; }
+.gchat-shell.hide-members #membersPanel { display: none; }
+
+/* Мобильная версия: рейка превращается в компактный ряд под композером */
+@media (max-width: 760px) {
+  body.chats-body { overflow-x: hidden; }
+  .gchat-columns { column-gap: 0; display: flex; flex-direction: column; }
+  .chat-rail {
+    position: static; flex-direction: row; order: 9;
+    justify-content: center; margin-top: 10px;
+  }
+  .chat-rail button {
+    writing-mode: horizontal-tb;
+    padding: 6px 12px; font-size: .78rem;
+  }
+  #membersPanel { order: 8; margin-top: 10px; }
+  .gchat-thread-box { order: 1; }
+  .gchat-hero-head { flex-wrap: wrap; }
+  .gchat-hero-actions { flex-wrap: wrap; }
+}
+
+/* Единый контейнер чата (как в ЛС): сообщения + ввод в одной рамке */
+.gchat-thread-box {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.gchat-thread-box .gchat-messages {
+  border: none; border-radius: 0; box-shadow: none;
+  flex: 1; max-height: none; min-height: 300px;
+}
+.gchat-thread-box .typing-line { padding: 0 16px; min-height: 1.1em; }
+.gchat-thread-box .chat-input-bar { border-top: 1px solid var(--border); padding: 10px 12px; }
+
+/* Фиксированная высота чата: не растягивает страницу,
+   увеличивается когда скрыты описание/участники */
+.gchat-thread-box {
+  height: calc(100vh - var(--header-h) - 250px);
+  min-height: 380px;
+}
+.gchat-shell.hide-desc .gchat-thread-box { height: calc(100vh - var(--header-h) - 90px); }
+.gchat-shell.hide-members .gchat-thread-box { height: calc(100vh - var(--header-h) - 220px); }
+.gchat-shell.hide-desc.hide-members .gchat-thread-box { height: calc(100vh - var(--header-h) - 60px); }
+.thread-topline { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.pinned-open-btn { flex-shrink: 0; }
+.announce-bar { margin-bottom: 10px; }
+@media (max-width: 760px) {
+  .gchat-thread-box, .gchat-shell.hide-desc .gchat-thread-box,
+  .gchat-shell.hide-members .gchat-thread-box,
+  .gchat-shell.hide-desc.hide-members .gchat-thread-box { height: calc(100vh - var(--header-h) - 120px); }
+}
+
+/* ---------- Модалка персоны ---------- */
+.persona-link { cursor: pointer; }
+.persona-link:hover b { text-decoration: underline; }
+.persona-modal-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.persona-modal-ava {
+  width: 72px; height: 72px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem; font-weight: 800; color: #fff; overflow: hidden;
+}
+.persona-modal-ava img { width: 100%; height: 100%; object-fit: cover; }
+.persona-modal-name { font-size: 1.2rem; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.persona-modal-bio { color: var(--text); background: var(--bg2); border-radius: 12px; padding: 12px 14px; margin-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.persona-modal-meta { color: var(--muted); font-size: .84rem; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+
+/* Системные сообщения: кликабельный никнейм */
+.sys-user { font-weight: 800; color: var(--accent); }
+.sys-user:hover { text-decoration: underline; }
+
+/* Подсветка найденных ключевых слов */
+.search-hl {
+  background: color-mix(in srgb, var(--warn) 50%, transparent);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0 2px;
+}
+

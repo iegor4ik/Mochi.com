@@ -1,0 +1,381 @@
+/**
+ * Комната-локация: тик-цикл (20 Гц), авторитарное движение, снапшоты 10 Гц
+ * с ограничением AOI (~600 px), игровой чат, объекты, переходы через двери.
+ * Пустые комнаты выгружаются из памяти.
+ */
+const { query } = require('../config/db');
+const { getLocation, moveCircle, getSpawn } = require('./map');
+const objects = require('./objects');
+const { v } = require('../utils/validate');
+
+const TICK_MS = 50;           // тик сервера: 20 Гц
+const SNAPSHOT_MS = 100;      // снапшоты: 10 Гц
+const AOI_RADIUS = 600;       // радиус «зоны интереса»
+const PLAYER_RADIUS = 22;     // радиус тела-кругляшки
+const MAX_SPEED = 220;        // px/s — максимум по ТЗ
+const MOVE_MIN_INTERVAL = 50; // чаще 20 Гц сообщения move игнорируются
+const CHAT_MAX_PER_WINDOW = 5;
+const CHAT_WINDOW_MS = 10 * 1000;
+const INTERACT_MAX_PER_SEC = 5;
+const EXIT_RADIUS = 100;      // с какого расстояния можно «нажать E» на дверь
+
+const rooms = new Map(); // slug → Room
+
+const round1 = (n) => Math.round(n * 10) / 10;
+const inAoi = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2 <= AOI_RADIUS * AOI_RADIUS;
+
+function sendTo(ws, frame) {
+  if (ws.readyState === 1) ws.send(JSON.stringify(frame));
+}
+
+/** История чата локации (последние limit сообщений, старые сверху) */
+async function fetchHistory(locationId, limit = 20) {
+  const { rows } = await query(
+    `SELECT user_id, username, text, created_at
+     FROM chat_messages WHERE location_id = $1
+     ORDER BY created_at DESC LIMIT $2`,
+    [locationId, limit]
+  );
+  return rows.reverse();
+}
+
+// __PART2__
+
+class Room {
+  constructor(loc, objectRows) {
+    this.locationId = loc.id;
+    this.slug = loc.slug;
+    this.name = loc.name;
+    this.map = loc.map;
+    this.players = new Map(); // userId → player
+    this.objects = objectRows;
+    this.flushTimer = null;
+    this.lastTick = Date.now();
+  }
+
+  start() {
+    this.tickTimer = setInterval(() => this.tick(), TICK_MS);
+    this.snapshotTimer = setInterval(() => this.sendSnapshots(), SNAPSHOT_MS);
+  }
+
+  destroy() {
+    clearInterval(this.tickTimer);
+    clearInterval(this.snapshotTimer);
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+  }
+
+  /* ---------------- игроки ---------------- */
+
+  /** Публичное представление игрока */
+  publicPlayer(p) {
+    const out = {
+      userId: p.userId,
+      username: p.username,
+      avatar: p.avatar || null,
+      x: round1(p.x),
+      y: round1(p.y),
+      dir: p.dir,
+    };
+    if (p.holding != null) out.holding = p.holding;
+    return out;
+  }
+
+  async addPlayer(ws, user, { spawnId } = {}) {
+    // один аккаунт — одна игровая сессия: старое подключение закрывается
+    const existing = this.players.get(user.id);
+    if (existing) {
+      sendTo(existing.ws, { type: 'error', message: 'Ваш аккаунт подключён из другого окна' });
+      this.removePlayer(existing.ws, { skipUnload: true });
+      existing.ws.close(4000, 'replaced');
+    }
+    const spawn = getSpawn(this.map, spawnId);
+    const player = {
+      ws,
+      user, // профиль (нужен при переходе между локациями)
+      userId: user.id,
+      username: user.username,
+      avatar: user.avatar || null,
+      x: spawn.x,
+      y: spawn.y,
+      tx: spawn.x,
+      ty: spawn.y,
+      dir: 1,
+      moving: false,
+      holding: null,
+      lastMoveAccepted: 0,
+      chatTimes: [],
+      interactTimes: [],
+    };
+    this.players.set(user.id, player);
+    ws.room = this;
+
+    const history = await fetchHistory(this.locationId, 20);
+    sendTo(ws, {
+      type: 'join_ok',
+      you: this.publicPlayer(player),
+      location: { slug: this.slug, name: this.name, map: this.map },
+      players: [...this.players.values()].map((p) => this.publicPlayer(p)),
+      objects: this.objectsList(player.userId, null),
+      chatHistory: history,
+    });
+    // player_join — только тем, кто в AOI
+    for (const other of this.players.values()) {
+      if (other !== player && inAoi(other, player)) {
+        sendTo(other.ws, { type: 'player_join', player: this.publicPlayer(player) });
+      }
+    }
+  }
+
+  removePlayer(ws, { skipUnload = false } = {}) {
+    const player = [...this.players.values()].find((p) => p.ws === ws);
+    if (!player) return;
+    // соединение оборвалось с предметом в руках — предмет падает у ног
+    if (player.holding != null) objects.put(this, player);
+    this.players.delete(player.userId);
+    ws.room = null;
+    for (const other of this.players.values()) {
+      if (inAoi(other, player)) {
+        sendTo(other.ws, { type: 'player_leave', userId: player.userId });
+      }
+    }
+    if (!skipUnload && this.players.size === 0) this.unload();
+  }
+
+  /** Комната опустела: сохранить объекты и выгрузить из памяти */
+  unload() {
+    this.flushObjects().catch(() => {});
+    this.destroy();
+    if (rooms.get(this.slug) === this) rooms.delete(this.slug);
+  }
+
+  // __PART3__
+
+  /* ---------------- движение (авторитарное) ---------------- */
+
+  /** Целевая точка от клиента: кламп в границы; скорость сервер держит сам */
+  setMoveTarget(player, msg) {
+    const now = Date.now();
+    if (now - player.lastMoveAccepted < MOVE_MIN_INTERVAL) return; // чаще 20 Гц — игнор
+    player.lastMoveAccepted = now;
+    const x = Number(msg.x);
+    const y = Number(msg.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      sendTo(player.ws, { type: 'error', message: 'move: некорректные координаты' });
+      return;
+    }
+    // кламп в границы карты; телепорт невозможен — сервер ведёт игрока сам
+    player.tx = Math.min(this.map.width - 1, Math.max(1, x));
+    player.ty = Math.min(this.map.height - 1, Math.max(1, y));
+    player.moving = true;
+  }
+
+  tick() {
+    const now = Date.now();
+    const dt = Math.min(0.25, (now - this.lastTick) / 1000);
+    this.lastTick = now;
+
+    for (const p of this.players.values()) {
+      if (!p.moving) continue;
+      const dx = p.tx - p.x;
+      const dy = p.ty - p.y;
+      const dist = Math.hypot(dx, dy);
+      const step = MAX_SPEED * dt; // сервер сам ограничивает скорость
+      let nx;
+      let ny;
+      if (dist <= step) {
+        nx = p.tx;
+        ny = p.ty;
+        p.moving = false;
+      } else {
+        nx = p.x + (dx / dist) * step;
+        ny = p.y + (dy / dist) * step;
+      }
+      const res = moveCircle(this.map, p.x, p.y, nx, ny, PLAYER_RADIUS); // стены/границы
+      if (res.x > p.x + 0.01) p.dir = 1;
+      else if (res.x < p.x - 0.01) p.dir = -1;
+      p.x = res.x;
+      p.y = res.y;
+    }
+
+    // физика объектов (полёт, следование за держащим)
+    for (const o of this.objects) objects.step(this, o, dt);
+  }
+
+  /* ---------------- снапшоты (AOI) ---------------- */
+
+  /** Объекты для отправки: удерживаемые видит только держащий */
+  objectsList(forUserId, around) {
+    const list = [];
+    for (const o of this.objects) {
+      if (around && !inAoi(around, o)) continue; // AOI
+      if (o.taken_by != null && o.taken_by !== forUserId) continue; // «в руке» скрыт от остальных
+      list.push(o.toPublic());
+    }
+    return list;
+  }
+
+  sendSnapshots() {
+    for (const p of this.players.values()) {
+      const players = [];
+      for (const q of this.players.values()) {
+        if (q === p || inAoi(p, q)) players.push(this.publicPlayer(q));
+      }
+      sendTo(p.ws, { type: 'snapshot', players, objects: this.objectsList(p.userId, p) });
+    }
+  }
+
+  // __PART4__
+
+  /* ---------------- чат ---------------- */
+
+  async chat(player, text) {
+    const now = Date.now();
+    player.chatTimes = player.chatTimes.filter((t) => now - t < CHAT_WINDOW_MS);
+    if (player.chatTimes.length >= CHAT_MAX_PER_WINDOW) {
+      sendTo(player.ws, { type: 'error', message: 'Слишком много сообщений — подождите пару секунд' });
+      return;
+    }
+    let clean;
+    try {
+      clean = v.str(text, { label: 'Сообщение', min: 1, max: 300 });
+    } catch (e) {
+      sendTo(player.ws, { type: 'error', message: e.message });
+      return;
+    }
+    player.chatTimes.push(now);
+    // чат пишем в БД сразу (персистентность по ТЗ)
+    query(
+      'INSERT INTO chat_messages (location_id, user_id, username, text) VALUES ($1,$2,$3,$4)',
+      [this.locationId, player.userId, player.username, clean]
+    ).catch((e) => console.error('[chat] insert:', e.message));
+    // рассылка только в AOI говорящего
+    for (const other of this.players.values()) {
+      if (other === player || inAoi(player, other)) {
+        sendTo(other.ws, {
+          type: 'chat',
+          userId: player.userId,
+          username: player.username,
+          x: round1(player.x),
+          y: round1(player.y),
+          text: clean,
+        });
+      }
+    }
+  }
+
+  /* ---------------- объекты ---------------- */
+
+  markDirty(obj) {
+    obj.dirty = true;
+    if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => {
+        this.flushTimer = null;
+        this.flushObjects().catch((e) => console.error('[objects] flush:', e.message));
+      }, 5000); // debounce-запись ~раз в 5 с
+    }
+  }
+
+  async flushObjects() {
+    const dirty = this.objects.filter((o) => o.dirty);
+    if (!dirty.length) return;
+    for (const o of dirty) o.dirty = false;
+    for (const o of dirty) {
+      await query(
+        `UPDATE world_objects
+         SET x = $2, y = $3, vx = $4, vy = $5, taken_by = $6, updated_at = now()
+         WHERE id = $1`,
+        [o.id, o.x, o.y, o.vx, o.vy, o.taken_by]
+      );
+    }
+  }
+
+  broadcastObjectState(obj) {
+    for (const p of this.players.values()) {
+      sendTo(p.ws, { type: 'object_state', object: obj.toPublic() });
+    }
+  }
+
+  /** Предмет исчез (использован) — рассылка всем в комнате */
+  broadcastRemoved(id) {
+    for (const p of this.players.values()) {
+      sendTo(p.ws, { type: 'object_removed', id });
+    }
+  }
+
+  /** interact: take | put | throw (лимит 5/с на соединение) */
+  interact(player, msg) {
+    const now = Date.now();
+    player.interactTimes = player.interactTimes.filter((t) => now - t < 1000);
+    if (player.interactTimes.length >= INTERACT_MAX_PER_SEC) {
+      sendTo(player.ws, { type: 'error', message: 'Слишком много действий' });
+      return;
+    }
+    player.interactTimes.push(now);
+    let err = null;
+    if (msg.action === 'take') {
+      const objectId = v.int(msg.objectId, { label: 'objectId', min: 1, optional: true, def: null });
+      err = objectId == null ? 'Не указан объект' : objects.take(this, player, objectId);
+    } else if (msg.action === 'put') {
+      err = objects.put(this, player);
+    } else if (msg.action === 'throw') {
+      err = objects.throwObj(this, player, msg.dir);
+    } else if (msg.action === 'use') {
+      // использовать предмет из рук (заготовка: предмет расходуется и исчезает)
+      err = objects.use(this, player);
+    } else {
+      err = 'Неизвестное действие';
+    }
+    if (err) sendTo(player.ws, { type: 'error', message: err });
+  }
+
+  /* ---------------- переходы через двери ---------------- */
+
+  /** Проверить близость к двери и перевести игрока в целевую локацию */
+  async useExit(player, exitId) {
+    const exit = (this.map.exits || []).find((e) => e.id === exitId);
+    if (!exit) {
+      sendTo(player.ws, { type: 'error', message: 'Дверь не найдена' });
+      return;
+    }
+    const cx = exit.x + exit.w / 2;
+    const cy = exit.y + exit.h / 2;
+    if (Math.hypot(player.x - cx, player.y - cy) > EXIT_RADIUS) {
+      sendTo(player.ws, { type: 'error', message: 'Дверь слишком далеко — подойдите ближе' });
+      return;
+    }
+    const target = await getRoom(exit.to);
+    if (!target) {
+      sendTo(player.ws, { type: 'error', message: 'Локация временно недоступна' });
+      return;
+    }
+    // переход = leave текущей + join новой в той же WS-сессии
+    this.removePlayer(player.ws);
+    await target.addPlayer(player.ws, player.user, { spawnId: exit.spawn });
+  }
+}
+
+/** Получить (или загрузить) комнату по slug локации */
+async function getRoom(slug) {
+  const clean = v.str(slug, { label: 'Локация', max: 64 });
+  let room = rooms.get(clean);
+  if (room) return room;
+  const loc = await getLocation(clean);
+  if (!loc) return null;
+  const { rows } = await query(
+    'SELECT id, def_key, x, y, vx, vy, taken_by FROM world_objects WHERE location_id = $1',
+    [loc.id]
+  );
+  room = new Room(loc, rows.map((r) => new objects.WorldObject(r)));
+  rooms.set(clean, room);
+  room.start();
+  console.log(`[room] локация «${room.name}» загружена (${room.objects.length} объектов)`);
+  return room;
+}
+
+/** Все активные комнаты (для graceful shutdown) */
+function allRooms() {
+  return [...rooms.values()];
+}
+
+module.exports = { getRoom, allRooms, inAoi, AOI_RADIUS, PLAYER_RADIUS };
+

@@ -1,0 +1,16 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# зависимости игры (свой package.json — изоляция по §1)
+COPY game-server/package.json game-server/package-lock.json* ./
+RUN npm install --omit=dev
+
+COPY game-server ./game-server
+
+ENV NODE_ENV=production
+EXPOSE 3001
+
+WORKDIR /app/game-server
+# миграции игры + запуск (сид отдельно: npm run seed)
+CMD ["sh", "-c", "node scripts/migrate.js && node src/index.js"]

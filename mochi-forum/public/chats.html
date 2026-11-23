@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light" data-chats="1">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mochi chats — чатсы M-o-chi.com</title>
+  <meta name="description" content="Mochi chats — вторая половина M-o-chi.com: групповые чаты-чатсы, лента, персоны.">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/chats.css">
+</head>
+<body class="chats-body">
+  <!-- ================= Шапка Mochi chats (не меняется от дизайна чатса) ================= -->
+  <header class="header chats-header">
+    <div class="container header-inner">
+      <a class="logo" href="/chats.html#/" aria-label="Mochi chats — на главную">
+        <svg class="logo-svg" viewBox="0 0 360 64" aria-hidden="true">
+          <defs>
+            <linearGradient id="clogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="var(--accent)"/>
+              <stop offset="100%" stop-color="var(--accent2)"/>
+            </linearGradient>
+          </defs>
+          <text x="2" y="47" class="logo-text">M</text>
+          <g class="logo-o">
+            <circle cx="86" cy="33" r="24" fill="url(#clogoGrad)"/>
+            <circle cx="86" cy="33" r="9.5" fill="var(--card)" opacity=".28"/>
+            <circle cx="86" cy="33" r="9.5" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>
+            <ellipse cx="77" cy="23" rx="8" ry="5" fill="#fff" opacity=".4" transform="rotate(-24 77 23)"/>
+          </g>
+          <text x="118" y="47" class="logo-text">chi</text>
+          <!-- надпись chats с кружком поменьше -->
+          <circle cx="222" cy="36" r="12" fill="url(#clogoGrad)" opacity=".9"/>
+          <text x="242" y="47" class="logo-text chats-logo-sub">chats</text>
+        </svg>
+      </a>
+
+      <nav class="nav" id="chatsNav"></nav>
+
+      <div class="auth-area" id="chatsAuthArea"></div>
+
+      <button class="burger" id="chatsBurger" aria-label="Меню">☰</button>
+    </div>
+    <div class="mobile-menu" id="chatsMobileMenu"></div>
+  </header>
+
+  <!-- ================= Контент (здесь действует дизайн чатса) ================= -->
+  <main id="app" class="container app-main chats-main">
+    <div class="page-loading"><div class="spinner"></div></div>
+  </main>
+
+  <!-- ================= Подвал ================= -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>🍡 <b>M<span class="footer-o">o</span>chi chats</b> — вторая половинка форума</span>
+      <span class="muted">Чатсы · Персоны · Моти · <a href="/#/">На основной сайт</a></span>
+    </div>
+  </footer>
+
+  <div id="toasts" class="toasts"></div>
+  <div id="modalRoot"></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/chats/core.js"></script>
+  <script src="/js/chats/feed.js"></script>
+  <script src="/js/chats/chat.js"></script>
+  <script src="/js/chats/core-boot.js"></script>
+</body>
+</html>

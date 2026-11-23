@@ -1,0 +1,219 @@
+/**
+ * Персонаж-«кругляшка»: круглое тело, внутри — фото пользователя (обрезано
+ * по кругу; нет аватара — плейсхолдер-цвет), две ручки по бокам, слегка
+ * вынесенные вперёд (сглаженная текстура без «битых пикселей»), ЛИЦО
+ * (глаза + рот, поворачивается в сторону взгляда; взгляд вверх — затылок),
+ * ник над головой. Текстуры ручек/аватара — на 2× канве.
+ */
+window.GameCharacter = (() => {
+  const BODY_R = 22;      // радиус тела (= PLAYER_RADIUS сервера)
+  const ARM_RX = 8;       // ручка: полуось X
+  const ARM_RY = 11;      // ручка: полуось Y
+  const ARM_DIST = 21;    // базовое расстояние от центра до ручки
+  const ARM_FORWARD = 9;  // вынос ручек «вперёд» по направлению взгляда
+  const AVA_SCALE = 2;    // аватар/ручки рисуются на 2× канве — без лесенок
+
+  /** Цвет-плейсхолдер по userId (стабильный) */
+  function colorOf(userId) {
+    const palette = [0xff5c8a, 0x7c5cff, 0x3ecf8e, 0x38bdf8, 0xfb923c, 0xa78bfa];
+    return palette[userId % palette.length];
+  }
+
+  /** Сглаженная текстура ручки (белая — красится tint'ом в цвет игрока) */
+  function ensureHandTexture(scene) {
+    if (scene.textures.exists('hand_tex')) return;
+    const w = (ARM_RX * 2 + 2) * AVA_SCALE;
+    const h = (ARM_RY * 2 + 2) * AVA_SCALE;
+    const tex = scene.textures.createCanvas('hand_tex', w, h);
+    const ctx = tex.getContext();
+    const cx = w / 2;
+    const cy = h / 2;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(cx, cy));
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.8, '#ffffff');
+    grad.addColorStop(0.93, 'rgba(255,255,255,0.92)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale((ARM_RX + 1) / Math.max(ARM_RX + 1, ARM_RY + 1), (ARM_RY + 1) / Math.max(ARM_RX + 1, ARM_RY + 1));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(ARM_RX + 1, ARM_RY + 1), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    tex.refresh();
+  }
+
+  // __PART2__
+
+  /** Создать контейнер персонажа. avatarUrl — абсолютный URL фото (или null). */
+  function create(scene, player) {
+    ensureHandTexture(scene);
+    const c = scene.add.container(player.x, player.y);
+    c.depth = 10;
+
+    // тело — круг
+    const body = scene.add.circle(0, 0, BODY_R, colorOf(player.userId), 1);
+    body.setStrokeStyle(2, 0xffffff, 0.65);
+    c.add(body);
+
+    // аватар внутри круга: динамическая текстура, 2× канва (без пикселей)
+    const texKey = `ava_${player.userId}`;
+    if (player.avatar && !scene.textures.exists(texKey)) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        if (!scene.scene || !scene.textures || !c.list.includes(body)) return;
+        const size = BODY_R * 2 * AVA_SCALE;
+        const canvasTex = scene.textures.createCanvas(texKey, size, size);
+        const ctx = canvasTex.getContext();
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2 - AVA_SCALE, 0, Math.PI * 2);
+        ctx.clip();
+        const s = Math.max(size / img.width, size / img.height);
+        const w = img.width * s;
+        const h = img.height * s;
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        ctx.restore();
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2 - AVA_SCALE, 0, Math.PI * 2);
+        ctx.lineWidth = AVA_SCALE * 1.2;
+        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        ctx.stroke();
+        canvasTex.refresh();
+        const avatarImg = scene.add.image(0, 0, texKey);
+        avatarImg.setDisplaySize(BODY_R * 2, BODY_R * 2);
+        c.addAt(avatarImg, 1); // поверх тела, под лицом/ручками/ником
+      };
+      img.onerror = () => { /* остаётся цветной плейсхолдер */ };
+      img.src = player.avatar;
+    }
+
+    // ручки: сглаженная текстура, tint в цвет игрока, слегка вперёд по взгляду
+    const armL = scene.add.image(0, 0, 'hand_tex');
+    const armR = scene.add.image(0, 0, 'hand_tex');
+    armL.setDisplaySize(ARM_RX * 2, ARM_RY * 2).setTint(colorOf(player.userId)).setAlpha(0.95);
+    armR.setDisplaySize(ARM_RX * 2, ARM_RY * 2).setTint(colorOf(player.userId)).setAlpha(0.95);
+    c.add(armL);
+    c.add(armR);
+
+    // ЛИЦО: белки + зрачки + рот-дуга (положение задаёт setFace)
+    const eyeL = scene.add.circle(0, 0, 4.5, 0xffffff, 1);
+    const eyeR = scene.add.circle(0, 0, 4.5, 0xffffff, 1);
+    const pupL = scene.add.circle(0, 0, 2, 0x1a2030, 1);
+    const pupR = scene.add.circle(0, 0, 2, 0x1a2030, 1);
+    const mouth = scene.add.arc(0, 0, 7, 200, 340, false);
+    mouth.setStrokeStyle(1.6, 0x1a2030, 0.9);
+    c.add(eyeL); c.add(eyeR); c.add(pupL); c.add(pupR); c.add(mouth);
+
+    // ник НАД персонажем (ТЗ п.2)
+    const name = scene.add.text(0, -(BODY_R + 16), player.username, {
+      fontFamily: 'Segoe UI, sans-serif',
+      fontSize: '13px',
+      color: '#fff',
+      stroke: '#00000090',
+      strokeThickness: 3,
+    }).setOrigin(0.5);
+    c.add(name);
+
+    c.setData('armL', armL);
+    c.setData('armR', armR);
+    c.setData('body', body);
+    c.setData('eyeL', eyeL);
+    c.setData('eyeR', eyeR);
+    c.setData('pupL', pupL);
+    c.setData('pupR', pupR);
+    c.setData('mouth', mouth);
+    c.setData('walkPhase', 0);
+    c.setData('dir', player.dir || 1);
+    c.setData('face', 'down');
+    applyFace(c);
+
+    return c;
+  }
+
+  // __PART3__
+
+  /** Расстановка лица по взгляду (вверх — затылок, глаз нет — как в SS13) */
+  function applyFace(c) {
+    const face = c.getData('face') || 'down';
+    const eyeL = c.getData('eyeL');
+    const eyeR = c.getData('eyeR');
+    const pupL = c.getData('pupL');
+    const pupR = c.getData('pupR');
+    const mouth = c.getData('mouth');
+    const armL = c.getData('armL');
+    const armR = c.getData('armR');
+    if (!eyeL) return;
+
+    const hidden = face === 'up';
+    eyeL.setVisible(!hidden);
+    eyeR.setVisible(!hidden);
+    pupL.setVisible(!hidden);
+    pupR.setVisible(!hidden);
+    mouth.setVisible(!hidden);
+
+    let ex = 0;
+    let ey = -6;
+    if (face === 'right') { ex = 6; ey = -6; }
+    else if (face === 'left') { ex = -6; ey = -6; }
+    else if (face === 'down') { ex = 0; ey = 0; }
+
+    const sep = 4.5; // половина расстояния между глаз
+    eyeL.x = ex - sep; eyeL.y = ey;
+    eyeR.x = ex + sep; eyeR.y = ey;
+    const px = face === 'right' ? 1.4 : face === 'left' ? -1.4 : 0;
+    const py = face === 'down' ? 1.2 : -0.6;
+    pupL.x = eyeL.x + px; pupL.y = eyeL.y + py;
+    pupR.x = eyeR.x + px; pupR.y = eyeR.y + py;
+    // рот-дуга ниже глаз; при взгляде влево отражаем
+    mouth.x = ex; mouth.y = ey + 9;
+    mouth.setAngle(face === 'left' ? 180 : 0);
+
+    // ручки слегка вперёд по взгляду
+    const dir = c.getData('dir') || 1;
+    const fwd = face === 'right' ? 1 : face === 'left' ? -1 : dir;
+    armL.x = -ARM_DIST + fwd * ARM_FORWARD;
+    armR.x = ARM_DIST + fwd * ARM_FORWARD;
+    armL.y = 2;
+    armR.y = 2;
+  }
+
+  /** Повернуть персонажа (клик мышью или смена направления движения) */
+  function setFace(c, face) {
+    if (!c || c.getData('face') === face) return;
+    c.setData('face', face);
+    if (face === 'right') c.setData('dir', 1);
+    if (face === 'left') c.setData('dir', -1);
+    applyFace(c);
+  }
+
+  /** Анимация ходьбы: непрерывное покачивание ручек (плавное, без рывков) */
+  function walk(c, moving, delta = 16) {
+    const armL = c.getData('armL');
+    const armR = c.getData('armR');
+    if (!armL || !armR) return;
+    if (moving) {
+      const phase = (c.getData('walkPhase') || 0) + delta * 0.02;
+      c.setData('walkPhase', phase);
+      const bob = Math.sin(phase) * 4;
+      armL.y = 2 + bob;
+      armR.y = 2 - bob;
+    } else {
+      // мягкий возврат в базовую позицию
+      armL.y += (2 - armL.y) * 0.25;
+      armR.y += (2 - armR.y) * 0.25;
+    }
+  }
+
+  /** Предмет в руке: позиция у передней ручки (вызывается из world.js) */
+  function handPos(c) {
+    const dir = c.getData('dir') || 1;
+    return { x: c.x + dir * (ARM_DIST + ARM_FORWARD - 2), y: c.y - 4 };
+  }
+
+  return { create, setFace, walk, handPos, BODY_R, colorOf };
+})();
+
+

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Игра «Хаб» — M-o-chi.com</title>
+  <meta name="description" content="Хаб — онлайн-2D-игра M-o-chi.com: кругляшки, чат, объекты, переходы между локациями.">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/game.css">
+</head>
+<body class="game-body">
+  <!-- ================= Шапка (общая с форумом, минималистичная) ================= -->
+  <header class="header">
+    <div class="container header-inner">
+      <a class="logo" href="/#/">
+        <svg class="logo-svg" viewBox="0 0 360 64" aria-hidden="true">
+          <defs>
+            <linearGradient id="glogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="var(--accent)"/>
+              <stop offset="100%" stop-color="var(--accent2)"/>
+            </linearGradient>
+          </defs>
+          <text x="2" y="47" class="logo-text">M</text>
+          <circle cx="86" cy="33" r="24" fill="url(#glogoGrad)"/>
+          <text x="118" y="47" class="logo-text">chi</text>
+          <circle cx="212" cy="36" r="12" fill="url(#glogoGrad)" opacity=".9"/>
+          <text x="232" y="47" class="logo-text game-logo-sub">game</text>
+        </svg>
+      </a>
+      <nav class="nav" id="gameNav">
+        <a href="/#/">Форум</a>
+        <a href="/chats.html#/">Чатсы</a>
+      </nav>
+      <div class="auth-area" id="gameAuthArea"></div>
+    </div>
+  </header>
+
+  <!-- ================= Игра ================= -->
+  <main id="app" class="game-main">
+    <div class="page-loading"><div class="spinner"></div></div>
+  </main>
+
+  <div id="toasts" class="toasts"></div>
+  <div id="modalRoot"></div>
+
+  <!-- Phaser 3 (vendor-файл или CDN в dev) -->
+  <script src="/js/game/vendor/phaser.min.js"
+          onerror="this.onerror=null;document.write('<script src=&quot;https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js&quot;><\/script>')"></script>
+  <!-- Общие скрипты сайта (порядок из ТЗ §3) -->
+  <script src="/js/api.js"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/ui.js"></script>
+  <!-- Код игры -->
+  <script src="/js/game/config.js"></script>
+  <script src="/js/game/assets.js"></script>
+  <script src="/js/game/items.js?v=2026100603"></script>
+  <script src="/js/game/net.js"></script>
+  <script src="/js/game/chat.js"></script>
+  <script src="/js/game/character.js?v=2026100603"></script>
+  <script src="/js/game/world.js?v=2026100603"></script>
+  <script src="/js/game/router.js"></script>
+  <script>if (window.Theme) Theme.apply();</script>
+</body>
+</html>

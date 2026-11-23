@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="110" viewBox="0 0 360 110" role="img" aria-label="M-o-chi.com">
+  <defs>
+    <linearGradient id="mochiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff5c8a"/>
+      <stop offset="100%" stop-color="#7c5cff"/>
+    </linearGradient>
+    <radialGradient id="mochiGloss" cx="35%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity=".85"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Буква M -->
+  <text x="8" y="82" font-family="'Segoe UI', Arial, sans-serif" font-size="76" font-weight="800" fill="#e8ecf8">M</text>
+
+  <!-- Выделенная буква O: моти-шар с градиентным кольцом -->
+  <g>
+    <circle cx="152" cy="58" r="40" fill="url(#mochiGrad)"/>
+    <circle cx="152" cy="58" r="40" fill="none" stroke="#ffffff" stroke-opacity=".25" stroke-width="3"/>
+    <circle cx="152" cy="58" r="15" fill="#12172a" opacity=".55"/>
+    <circle cx="152" cy="58" r="15" fill="none" stroke="#ffffff" stroke-opacity=".5" stroke-width="2.5"/>
+    <!-- блик -->
+    <ellipse cx="138" cy="42" rx="14" ry="9" fill="url(#mochiGloss)" transform="rotate(-24 138 42)"/>
+  </g>
+
+  <!-- chi -->
+  <text x="204" y="82" font-family="'Segoe UI', Arial, sans-serif" font-size="76" font-weight="800" fill="#e8ecf8">chi</text>
+
+  <!-- домен -->
+  <text x="8" y="104" font-family="'Segoe UI', Arial, sans-serif" font-size="17" font-weight="600" letter-spacing="4" fill="#93a0c0">.COM · FORUM</text>
+</svg>
